@@ -40,6 +40,36 @@ export const ACTION = {
   generate: "당직 생성",
 };
 
+export const RULE = {
+  preset: "당직 규칙",
+  newRule: "새 규칙",
+  edit: "편집",
+  addTemplates: "예시 템플릿 추가",
+  name: "규칙 이름",
+  workdays: "근무 요일",
+  holidayMode: "공휴일 처리",
+  holidayExclude: "제외(공휴일엔 당직 없음)",
+  holidayInclude: "포함(공휴일도 당직)",
+  holidayOnly: "공휴일만 당직",
+  peoplePerDay: "하루 당직 인원",
+  allowedRanks: "당직 가능 직급",
+  allowedRanksHint: "선택 안 하면 전체 직급 허용",
+  requiredRanks: "필수 직급(매일 최소 1명)",
+  requiredRanksHint: "예: 과장 이상 1명 필수",
+  strategy: "배정 방식",
+  stratFair: "공평(최소 횟수 우선)",
+  stratRotation: "순환(등록 순서)",
+  stratRandom: "무작위",
+  minRestDays: "최소 휴식 간격(일)",
+  minRestHint: "0이면 제약 없음. 1이면 연속일 금지.",
+  maxPerPerson: "1인 최대 횟수",
+  maxPerPersonHint: "비우면 무제한",
+  weekendWeight: "주말·공휴일 가중치",
+  weekendWeightHint: "공평 배정 시 주말 당직을 더 무겁게(예: 1.5)",
+  noRanks: "직원 직급이 없습니다. 먼저 직원을 등록하세요.",
+  shortfallSummary: (n: number) => `${n}일은 규칙을 다 채우지 못했습니다.`,
+};
+
 export const MSG = {
   datePlaceholder: "YYYY-MM-DD",
   invalidDate: "날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)",

@@ -3,7 +3,7 @@
 const NS = "randomduty";
 const WORKSPACE = "default";
 
-export type Collection = "staff" | "holidays" | "vacations" | "duty";
+export type Collection = "staff" | "holidays" | "vacations" | "duty" | "rules";
 
 export function storageKey(collection: Collection): string {
   return `${NS}:${WORKSPACE}:${collection}`;

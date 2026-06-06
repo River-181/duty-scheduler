@@ -11,10 +11,24 @@
 ## 주요 기능
 
 - **직원 / 공휴일 / 휴가 관리** — 추가·삭제, 표 형태 보기
-- **공평성 당직 생성** — 주말·공휴일 제외, 휴가자 제외, 최소 당직 횟수 우선 배정
+- **규칙 기반 당직 생성** — 기관마다 다른 규칙을 **프리셋(룰셋)** 으로 저장하고 골라서 생성
 - **3가지 보기** — 목록 / 월 캘린더 / 통계(직원별 횟수 + 공평성 지표)
 - **CSV 가져오기·내보내기** — 한글 헤더, 엑셀 호환(BOM). 기존 파이썬 버전 CSV와 100% 호환
 - **오프라인·프라이버시** — 데이터가 외부로 전송되지 않음(브라우저에만 저장)
+
+### 당직 규칙(룰셋)
+
+기관마다 당직 규칙이 다릅니다. 이 앱은 규칙을 **명명된 프리셋**으로 저장해 두고 생성 시
+선택합니다. 프리셋은 JSON으로 내보내기/가져오기 할 수 있어 기관 간 공유도 가능합니다.
+한 규칙에 다음 조건들을 묶을 수 있습니다:
+
+- **근무일 정의** — 당직 대상 요일(예: 평일만 / 주말 포함 / 월·수·금) + 공휴일 처리(제외 / 포함 / 공휴일만)
+- **조 구성** — 하루 당직 인원(N명), 당직 가능 직급 제한, 매일 필수 직급(예: 과장↑ 1명)
+- **배정 방식** — 공평(최소 횟수 우선) / 순환(등록 순서) / 무작위(결정적 시드)
+- **휴식·상한** — 같은 사람 재당직 최소 간격(연속 방지), 1인 최대 횟수, 주말·공휴일 가중치
+
+내장 예시 템플릿: `평일 1인 공평`, `주말·공휴일 2인(시니어 가중)`, `월·수·금 순환`.
+규칙을 다 채우지 못한 날은 생성 후 "부족분"으로 알려 줍니다.
 
 ## 빠른 시작
 
@@ -82,9 +96,12 @@ It is a **serverless** remodel of a Python/tkinter desktop tool. All data lives 
 the browser's `localStorage`, so different companies or teams can open the same URL
 and use it independently — no accounts, no backend, nothing leaves the browser.
 
-**Features:** staff/holiday/vacation CRUD · fairness-aware scheduler · list /
-month-calendar / statistics views · CSV import-export (Excel-compatible, fully
-compatible with the original Python version's files).
+**Features:** staff/holiday/vacation CRUD · **rule-based scheduler** with named,
+shareable rule presets (duty weekdays + holiday handling, people-per-day, rank
+constraints, fair/rotation/random strategy, min rest gap, per-person cap, weekend
+weighting) · list / month-calendar / statistics views · CSV import-export
+(Excel-compatible, fully compatible with the original Python version's files).
+Each organization configures its own rules; presets export/import as JSON.
 
 **Run:** `npm install && npm run dev` (dev) · `npm run build` (static export to `out/`).
 

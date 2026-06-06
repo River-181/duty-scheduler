@@ -1,19 +1,10 @@
-import type { Staff, Holiday, Vacation, DutyEntry } from "./types";
+import type { Staff, Holiday, Vacation, DutyEntry, DutyRule } from "./types";
 import { eachDate, isWeekend, parseDate } from "./date";
 
-// v1(파이썬) generate_schedule(main.py L39–54)의 충실한 이식 + 공평성 업그레이드.
-//
-// v1: collections.deque + rotate(-1) 순수 라운드로빈. 휴가로 회전이 밀리면 누적이
-//     불공평해진다.
-// v2: "현재 당직 횟수가 가장 적은 사람"을 고르는 최소 카운트 그리디. 모든 스킵 규칙
-//     (주말·공휴일 제외, 휴가자 제외, 아무도 없으면 미배정)은 그대로 유지한다.
-//     동점은 staff 배열 인덱스 오름차순 → 결정적이며, 동일 카운트 상태에서는
-//     라운드로빈과 같은 순서를 재현한다.
-
-/** v1 is_holiday(main.py L27) */
-function holidaySet(holidays: Holiday[]): Set<string> {
-  return new Set(holidays.map((h) => h.date));
-}
+// 규칙(DutyRule) 기반 당직 생성 엔진.
+// v1(파이썬)은 "평일·공휴일 제외 + 휴가자 건너뛰기 + 라운드로빈" 고정 규칙이었다.
+// 여기서는 기관마다 다른 규칙(근무일 정의, 하루 인원, 직급 제약, 휴식 간격,
+// 배정 방식, 1인 상한, 주말 가중치)을 받아 처리한다.
 
 /** v1 is_on_vacation(main.py L30) — 문자열 비교로 TZ 무관 */
 function isOnVacation(
@@ -26,10 +17,77 @@ function isOnVacation(
   );
 }
 
+/** 규칙에 따라 해당 날짜가 당직일인지 판정 */
+function isDutyDay(
+  dateStr: string,
+  rule: DutyRule,
+  holidays: Set<string>,
+): boolean {
+  const holiday = holidays.has(dateStr);
+  if (rule.holidayMode === "only") return holiday;
+  const onWeekday = rule.weekdays.includes(parseDate(dateStr).getDay());
+  if (rule.holidayMode === "include") return onWeekday || holiday;
+  // exclude
+  return onWeekday && !holiday;
+}
+
+/** 주말 또는 공휴일 → 가중치 적용 대상 */
+function isHeavyDay(dateStr: string, holidays: Set<string>): boolean {
+  return isWeekend(parseDate(dateStr)) || holidays.has(dateStr);
+}
+
+/** 날짜 문자열에서 결정적 시드 생성(무작위 전략 재현용) */
+function seedFrom(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** mulberry32 PRNG — 시드 동일 시 동일 수열(테스트·재생성 일관성) */
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+interface PersonState {
+  staff: Staff;
+  index: number; // 등록 순서(결정적 동점 처리)
+  count: number; // 당직 횟수(상한·rotation)
+  weighted: number; // 가중 횟수(fair)
+  lastDate: string | null; // 마지막 당직일(휴식 간격)
+}
+
+export interface Shortfall {
+  date: string;
+  needed: number;
+  filled: number;
+  reason: string;
+}
+
 export interface GenerateResult {
   schedule: DutyEntry[];
-  /** 근무일이지만 가용 인원이 없어 배정하지 못한 날짜 목록 */
-  unassigned: string[];
+  shortfalls: Shortfall[];
+}
+
+function dayGapOk(
+  state: PersonState,
+  dateStr: string,
+  minRestDays: number,
+): boolean {
+  if (minRestDays <= 0 || !state.lastDate) return true;
+  const diff =
+    (parseDate(dateStr).getTime() - parseDate(state.lastDate).getTime()) /
+    86400000;
+  return diff > minRestDays;
 }
 
 export function generateSchedule(
@@ -38,37 +96,101 @@ export function generateSchedule(
   staff: Staff[],
   holidays: Holiday[],
   vacations: Vacation[],
+  rule: DutyRule,
 ): GenerateResult {
-  const holidays_ = holidaySet(holidays);
-  const counts = new Map<string, number>(staff.map((s) => [s.name, 0]));
+  const holidaySet = new Set(holidays.map((h) => h.date));
+  const states: PersonState[] = staff.map((s, index) => ({
+    staff: s,
+    index,
+    count: 0,
+    weighted: 0,
+    lastDate: null,
+  }));
+
   const schedule: DutyEntry[] = [];
-  const unassigned: string[] = [];
+  const shortfalls: Shortfall[] = [];
+
+  const allowed = new Set(rule.allowedRanks);
+  const required = new Set(rule.requiredRanks);
 
   for (const dateStr of eachDate(startStr, endStr)) {
-    const d = parseDate(dateStr);
-    if (isWeekend(d) || holidays_.has(dateStr)) continue; // v1 스킵 규칙
+    if (!isDutyDay(dateStr, rule, holidaySet)) continue;
 
-    // 그날 휴가가 아닌 직원만 후보. 배열 인덱스를 동점 처리에 사용.
-    let pick: Staff | null = null;
-    let pickCount = Infinity;
-    for (const s of staff) {
-      if (isOnVacation(dateStr, s.name, vacations)) continue;
-      const c = counts.get(s.name) ?? 0;
-      if (c < pickCount) {
-        pick = s;
-        pickCount = c;
-      }
+    // 후보군: 휴가 아님 + 허용 직급 + 휴식 간격 충족 + 상한 미만
+    const pool = states.filter((st) => {
+      if (isOnVacation(dateStr, st.staff.name, vacations)) return false;
+      if (allowed.size > 0 && !allowed.has(st.staff.rank)) return false;
+      if (!dayGapOk(st, dateStr, rule.minRestDays)) return false;
+      if (rule.maxPerPerson !== null && st.count >= rule.maxPerPerson)
+        return false;
+      return true;
+    });
+
+    // 전략별 정렬/선택 순서
+    const order = orderPool(pool, dateStr, rule);
+
+    const picked: PersonState[] = [];
+
+    // 시니어(필수 직급) 우선 1명 확보
+    if (required.size > 0) {
+      const senior = order.find((st) => required.has(st.staff.rank));
+      if (senior) picked.push(senior);
     }
 
-    if (!pick) {
-      // v1과 동일: 가용 인원이 없으면 그날은 배정하지 않는다.
-      unassigned.push(dateStr);
-      continue;
+    for (const st of order) {
+      if (picked.length >= rule.peoplePerDay) break;
+      if (!picked.includes(st)) picked.push(st);
     }
 
-    schedule.push({ date: dateStr, name: pick.name, rank: pick.rank });
-    counts.set(pick.name, pickCount + 1);
+    // 결과 기록
+    const heavy = isHeavyDay(dateStr, holidaySet);
+    for (const st of picked) {
+      schedule.push({
+        date: dateStr,
+        name: st.staff.name,
+        rank: st.staff.rank,
+      });
+      st.count += 1;
+      st.weighted += heavy ? rule.weekendWeight : 1;
+      st.lastDate = dateStr;
+    }
+
+    // 부족분 기록
+    const seniorUnmet =
+      required.size > 0 && !picked.some((st) => required.has(st.staff.rank));
+    if (picked.length < rule.peoplePerDay || seniorUnmet) {
+      shortfalls.push({
+        date: dateStr,
+        needed: rule.peoplePerDay,
+        filled: picked.length,
+        reason: seniorUnmet
+          ? "필수 직급(시니어) 인원 부족"
+          : "가용 인원 부족",
+      });
+    }
   }
 
-  return { schedule, unassigned };
+  return { schedule, shortfalls };
+
+  function orderPool(
+    p: PersonState[],
+    dateStr: string,
+    r: DutyRule,
+  ): PersonState[] {
+    if (r.strategy === "random") {
+      const rnd = mulberry32(seedFrom(dateStr));
+      // Fisher–Yates(결정적)
+      const arr = [...p];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(rnd() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+    const key =
+      r.strategy === "fair"
+        ? (st: PersonState) => st.weighted
+        : (st: PersonState) => st.count; // rotation: 가중치 없는 순수 라운드로빈
+    return [...p].sort((a, b) => key(a) - key(b) || a.index - b.index);
+  }
 }
