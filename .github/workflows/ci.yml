@@ -1,0 +1,23 @@
+name: CI
+
+# 모든 push 와 PR 에서 린트·테스트·빌드를 검증한다.
+# (배포와 별개로, 포크/기여자도 품질 게이트를 거치게 한다.)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
